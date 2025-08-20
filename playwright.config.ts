@@ -169,7 +169,8 @@ const config: PlaywrightTestConfig = {
               {
                 command: webServerCommand,
                 url: `http://${localAddress}:${port}`,
-                reuseExistingServer: !isCI
+                reuseExistingServer: !isCI,
+                timeout: isContainer ? 120_000 : 60_000
               }
             ]
           : []),
@@ -178,7 +179,8 @@ const config: PlaywrightTestConfig = {
               {
                 command: dashboardsServerCommand,
                 url: `http://${localAddress}:${dashboardsPort}`,
-                reuseExistingServer: !isCI
+                reuseExistingServer: !isCI,
+                timeout: isContainer ? 120_000 : 60_000
               }
             ]
           : [])
