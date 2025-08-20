@@ -17,7 +17,6 @@ jobs:
   # Skip automatic execution on PR, but make workflow available for manual triggering
   check-trigger:
     runs-on: ubuntu-24.04
-    if: github.event_name != 'pull_request'
     outputs:
       should-run: ${{ steps.check.outputs.should-run }}
       target-ref: ${{ steps.check.outputs.target-ref }}
@@ -25,30 +24,28 @@ jobs:
       - name: Check execution conditions
         id: check
         run: |
-          echo "should-run=true" >> $GITHUB_OUTPUT
-          echo "target-ref=${{ inputs.ref }}" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "🔄 This workflow is available for manual execution on this PR"
+            echo "🎯 Target branch: ${{ github.head_ref }}"
+            echo "📝 To generate snapshots for this PR branch, go to Actions → Generate Fresh Snapshots → Run workflow"
+            echo "should-run=false" >> $GITHUB_OUTPUT
+            echo "target-ref=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "target-ref=${{ inputs.ref }}" >> $GITHUB_OUTPUT
+          fi
 
-  # This job runs for PRs but gets skipped, showing the desired status
-  pr-info:
-    runs-on: ubuntu-24.04
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: PR Information
+      - name: Skip for PR
+        if: github.event_name == 'pull_request'
         run: |
-          echo "🔄 This workflow is available for manual execution on this PR"
-          echo "🎯 Target branch: ${{ github.head_ref }}"
-          echo "📝 To generate snapshots for this PR branch, go to Actions → Generate Fresh Snapshots → Run workflow"
-          echo "::notice::Workflow available for manual execution on PR branch: ${{ github.head_ref }}"
-
-      - name: Skip execution
-        run: |
-          echo "Skipping automatic execution for PR"
-          exit 0
+          echo "::notice::Skipping automatic execution for PR. Workflow available for manual trigger."
+          exit 1
+        continue-on-error: true
 
   check-prerequisites:
     runs-on: ubuntu-24.04
     needs: check-trigger
-    if: github.event_name != 'pull_request'
+    if: needs.check-trigger.outputs.should-run == 'true'
     outputs:
       workflow-run-id: ${{ steps.get-workflow.outputs.workflow-run-id }}
       workflow-status: ${{ steps.get-workflow.outputs.workflow-status }}
@@ -106,7 +103,7 @@ jobs:
     runs-on: ubuntu-24.04
     container: mcr.microsoft.com/playwright:v1.54.2-noble
     needs: [check-trigger, check-prerequisites]
-    if: github.event_name != 'pull_request'
+    if: needs.check-trigger.outputs.should-run == 'true'
     env:
       # See: https://github.com/microsoft/playwright/issues/27620
       HOME: /root
@@ -311,7 +308,7 @@ jobs:
   summary:
     runs-on: ubuntu-24.04
     needs: [check-trigger, check-prerequisites, generate-snapshots]
-    if: always() && github.event_name != 'pull_request'
+    if: always() && needs.check-trigger.outputs.should-run == 'true'
     steps:
       - name: Generate summary
         run: |
