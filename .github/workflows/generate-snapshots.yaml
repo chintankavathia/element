@@ -14,9 +14,10 @@ on:
       - '.github/workflows/generate-snapshots.yaml' # Only trigger if this workflow file changes
 
 jobs:
-  # Skip automatic execution on PR, but make workflow available for manual triggering
+  # Skip automatic execution on PR, but make workflow available for manual triggering and re-runs
   check-trigger:
     runs-on: ubuntu-24.04
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.run_attempt > 1)
     outputs:
       should-run: ${{ steps.check.outputs.should-run }}
       target-ref: ${{ steps.check.outputs.target-ref }}
@@ -24,28 +25,38 @@ jobs:
       - name: Check execution conditions
         id: check
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "🔄 This workflow is available for manual execution on this PR"
-            echo "🎯 Target branch: ${{ github.head_ref }}"
-            echo "📝 To generate snapshots for this PR branch, go to Actions → Generate Fresh Snapshots → Run workflow"
-            echo "should-run=false" >> $GITHUB_OUTPUT
-            echo "target-ref=${{ github.head_ref }}" >> $GITHUB_OUTPUT
-          else
-            echo "should-run=true" >> $GITHUB_OUTPUT
+          echo "should-run=true" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "target-ref=${{ inputs.ref }}" >> $GITHUB_OUTPUT
+          else
+            # For PR re-runs, use the head ref
+            echo "target-ref=${{ github.head_ref }}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Skip for PR
-        if: github.event_name == 'pull_request'
+  # This job runs for PRs on first run only, showing instructions for re-running
+  pr-info:
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'pull_request' && github.run_attempt == 1
+    steps:
+      - name: PR Information
         run: |
-          echo "::notice::Skipping automatic execution for PR. Workflow available for manual trigger."
-          exit 1
-        continue-on-error: true
+          echo "🔄 This workflow is available for execution on this PR"
+          echo "🎯 Target branch: ${{ github.head_ref }}"
+          echo "📝 To generate snapshots for this PR branch:"
+          echo "   Option 1: Click 'Re-run jobs' or 'Re-run all jobs' on this workflow run"
+          echo "   Option 2: Go to Actions → Generate Fresh Snapshots → Run workflow manually"
+          echo "ℹ️  For manual runs: Select 'Use workflow from' → '${{ github.head_ref }}' and enter the branch name: '${{ github.head_ref }}'"
+          echo "::notice::To run snapshot generation, click 'Re-run jobs' on this workflow or trigger manually"
+
+      - name: Skip first execution
+        run: |
+          echo "✅ Skipping first execution for PR. Use 'Re-run jobs' to execute snapshot generation."
+          echo "::notice::PR detected - first run skipped, re-run to execute snapshot generation"
 
   check-prerequisites:
     runs-on: ubuntu-24.04
     needs: check-trigger
-    if: needs.check-trigger.outputs.should-run == 'true'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.run_attempt > 1)
     outputs:
       workflow-run-id: ${{ steps.get-workflow.outputs.workflow-run-id }}
       workflow-status: ${{ steps.get-workflow.outputs.workflow-status }}
@@ -103,7 +114,7 @@ jobs:
     runs-on: ubuntu-24.04
     container: mcr.microsoft.com/playwright:v1.54.2-noble
     needs: [check-trigger, check-prerequisites]
-    if: needs.check-trigger.outputs.should-run == 'true'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.run_attempt > 1)
     env:
       # See: https://github.com/microsoft/playwright/issues/27620
       HOME: /root
@@ -308,13 +319,22 @@ jobs:
   summary:
     runs-on: ubuntu-24.04
     needs: [check-trigger, check-prerequisites, generate-snapshots]
-    if: always() && needs.check-trigger.outputs.should-run == 'true'
+    if: always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.run_attempt > 1))
     steps:
       - name: Generate summary
         run: |
           echo "## Snapshot Generation Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch/Ref:** ${{ needs.check-trigger.outputs.target-ref }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "**Execution Type:** PR Re-run" >> $GITHUB_STEP_SUMMARY
+            echo "**PR Branch:** ${{ github.head_ref }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Target Branch:** ${{ needs.check-trigger.outputs.target-ref }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Execution Type:** Manual Dispatch" >> $GITHUB_STEP_SUMMARY
+            echo "**Branch/Ref:** ${{ needs.check-trigger.outputs.target-ref }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
           echo "**Based on workflow run:** ${{ needs.check-prerequisites.outputs.workflow-run-id }}" >> $GITHUB_STEP_SUMMARY
           echo "**Status:** ${{ needs.generate-snapshots.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
