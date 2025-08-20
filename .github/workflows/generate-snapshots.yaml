@@ -11,7 +11,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - '.github/workflows/generate-snapshots.yaml'  # Only trigger if this workflow file changes
+      - '.github/workflows/generate-snapshots.yaml' # Only trigger if this workflow file changes
 
 jobs:
   # Skip automatic execution on PR, but make workflow available for manual triggering
@@ -35,6 +35,13 @@ jobs:
             echo "target-ref=${{ inputs.ref }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Skip for PR
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "::notice::Skipping automatic execution for PR. Workflow available for manual trigger."
+          exit 1
+        continue-on-error: true
+
   check-prerequisites:
     runs-on: ubuntu-24.04
     needs: check-trigger
@@ -48,7 +55,7 @@ jobs:
         with:
           script: |
             const branchName = '${{ needs.check-trigger.outputs.target-ref }}';
-            
+
             try {
               await github.rest.repos.getBranch({
                 owner: context.repo.owner,
