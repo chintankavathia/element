@@ -57,12 +57,44 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash
-          apt install git-lfs
+          apt install git-lfs -y
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref || github.ref }}
           lfs: true
+          fetch-depth: 0
+
+      - name: Verify repository contents
+        run: |
+          echo "=== Repository Structure Debug ==="
+          echo "Current working directory:"
+          pwd
+          echo "Root directory contents:"
+          ls -la
+          echo "Checking for playwright directory:"
+          ls -la playwright/ || echo "playwright directory not found"
+          echo "Checking for playwright/e2e directory:"
+          ls -la playwright/e2e/ || echo "playwright/e2e directory not found"
+          echo "Checking git status:"
+          git status || echo "Git status failed"
+          echo "Checking LFS status:"
+          git lfs status || echo "Git LFS status failed"
+
+          # Try to manually pull LFS files if they're missing
+          if [ ! -d "playwright/e2e" ]; then
+            echo "=== Attempting to manually pull LFS files ==="
+            git lfs pull || echo "LFS pull failed"
+            echo "Checking again after LFS pull:"
+            ls -la playwright/ || echo "playwright directory still not found"
+            ls -la playwright/e2e/ || echo "playwright/e2e directory still not found"
+          fi
 
       - uses: actions/setup-node@v4
         with:
@@ -105,17 +137,149 @@ jobs:
       - name: Extract build artifacts
         run: |
           unzip -q dist.zip
+          echo "Contents after extraction:"
           ls -la
+
+          # Check if dist directory exists, if not, the contents might be extracted directly
+          if [ ! -d "dist" ]; then
+            echo "No dist directory found, checking if contents were extracted directly..."
+            # Look for element-examples and dashboards-demo directories
+            if [ -d "element-examples" ] || [ -d "dashboards-demo" ]; then
+              echo "Found dist contents directly, creating dist directory structure..."
+              mkdir -p dist
+              [ -d "element-examples" ] && mv element-examples dist/
+              [ -d "dashboards-demo" ] && mv dashboards-demo dist/
+              # Move any other potential dist contents
+              for dir in */; do
+                if [ "$dir" != "dist/" ] && [ "$dir" != "node_modules/" ] && [ "$dir" != ".git/" ]; then
+                  echo "Moving $dir to dist/"
+                  mv "$dir" dist/ 2>/dev/null || true
+                fi
+              done
+            else
+              echo "ERROR: Neither dist directory nor expected contents found"
+              echo "Available directories:"
+              ls -la
+              exit 1
+            fi
+          fi
+
+          echo "Final dist directory structure:"
+          ls -la dist/
+          echo "Checking for required directories:"
+          ls -la dist/element-examples/ || echo "element-examples not found"
+          ls -la dist/dashboards-demo/ || echo "dashboards-demo not found"
+
+          # Check if playwright directory is in dist and copy it to root if needed
+          if [ -d "dist/playwright" ]; then
+            echo "Found playwright directory in dist, copying to root..."
+            cp -r dist/playwright ./
+            echo "Playwright directory copied successfully"
+            ls -la playwright/
+          fi
 
       # Not injecting the token will exclude the brand packages, but this is fine for e2e tests.
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit --include=optional
 
+      # Fix Docker config permission issue
+      - name: Fix Docker permissions
+        run: |
+          mkdir -p /root/.docker
+          chmod 755 /root/.docker
+          # Create a minimal Docker config to avoid permission errors
+          echo '{}' > /root/.docker/config.json
+          chmod 644 /root/.docker/config.json
+
+      # Install http-server globally to ensure it's available
+      - name: Install http-server
+        run: npm install -g http-server
+
+      # Test if the web servers can start properly
+      - name: Test web server startup
+        run: |
+          echo "Testing element-examples server..."
+          if [ -d "dist/element-examples" ]; then
+            timeout 10s npx http-server dist/element-examples -s -p 4200 -a 127.0.0.1 &
+            SERVER_PID=$!
+            sleep 5
+            if curl -f http://127.0.0.1:4200/ > /dev/null 2>&1; then
+              echo "element-examples server started successfully"
+            else
+              echo "element-examples server failed to start or respond"
+            fi
+            kill $SERVER_PID || true
+          else
+            echo "dist/element-examples directory not found"
+            exit 1
+          fi
+
+          echo "Testing dashboards-demo server..."
+          if [ -d "dist/dashboards-demo" ]; then
+            timeout 10s npx http-server dist/dashboards-demo -s -p 4201 -a 127.0.0.1 &
+            SERVER_PID=$!
+            sleep 5
+            if curl -f http://127.0.0.1:4201/ > /dev/null 2>&1; then
+              echo "dashboards-demo server started successfully"
+            else
+              echo "dashboards-demo server failed to start or respond"
+            fi
+            kill $SERVER_PID || true
+          else
+            echo "dist/dashboards-demo directory not found"
+            exit 1
+          fi
+
       - name: Generate fresh snapshots
-        run: npx playwright test --update-snapshots=all
+        run: |
+          echo "=== Final Pre-flight Check ==="
+          echo "Current working directory:"
+          pwd
+          echo "Repository contents:"
+          ls -la
+
+          echo "=== Checking Playwright Setup ==="
+          echo "Playwright config file exists:"
+          ls -la playwright.config.ts || echo "playwright.config.ts not found"
+          echo "Playwright directory contents:"
+          ls -la playwright/ || echo "playwright directory not found"
+          echo "Test directories:"
+          ls -la playwright/e2e/ || echo "playwright/e2e directory not found"
+
+          # If playwright directory is still missing, try to copy from dist
+          if [ ! -d "playwright/e2e" ] && [ -d "dist/playwright/e2e" ]; then
+            echo "=== Copying playwright directory from dist ==="
+            cp -r dist/playwright ./
+            echo "Playwright directory copied from dist"
+            ls -la playwright/
+            ls -la playwright/e2e/
+          fi
+
+          if [ ! -d "playwright/e2e" ]; then
+            echo "ERROR: playwright/e2e directory is still missing!"
+            echo "This suggests the repository was not properly checked out."
+            echo "Available playwright-related directories:"
+            find . -type d -name "*playwright*" -o -name "*e2e*" || echo "No playwright or e2e directories found"
+            exit 1
+          fi
+
+          echo "Environment variables:"
+          echo "PLAYWRIGHT_CONTAINER=$PLAYWRIGHT_CONTAINER"
+          echo "PLAYWRIGHT_isvrt=$PLAYWRIGHT_isvrt"
+          echo "PLAYWRIGHT_isa11y=$PLAYWRIGHT_isa11y"
+          echo "CI=$CI"
+
+          echo "=== Running Playwright list to see available tests ==="
+          npx playwright test --list || echo "Failed to list tests"
+
+          echo "=== Running Playwright with snapshots update ==="
+          npx playwright test --update-snapshots=all --reporter=line
         env:
           PLAYWRIGHT_CONTAINER: true
-          PLAYWRIGHT_isvrt: true
+          PLAYWRIGHT_isvrt: 'true'
+          PLAYWRIGHT_isa11y: 'false'
+          # Increase web server timeout for container environment
+          PLAYWRIGHT_WEB_SERVER_TIMEOUT: 120000
 
       - name: Create snapshots archive
         run: |
