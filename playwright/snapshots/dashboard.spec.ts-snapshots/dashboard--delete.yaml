@@ -76,3 +76,8 @@
     - listitem: /Today \d+:\d+ Title Description/
   - link "Go to...":
     - /url: https://github.com/siemens/element/issues
+- dialog "Remove widget":
+  - button "Cancel"
+  - text: Do you really want to remove the widget?
+  - button "Cancel"
+  - button "Remove"

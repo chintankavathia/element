@@ -12,13 +12,13 @@
   - button "Jane Smith"
 - paragraph: Launchpad
 - paragraph: Access all your apps
-- link:
+- link "Assets":
   - /url: .
-- link:
+- link "Water":
   - /url: .
-- link:
+- link "Rocket":
   - /url: .
-- link:
+- link "Statistics":
   - /url: .
 - link "Add more":
   - /url: https://example.org
