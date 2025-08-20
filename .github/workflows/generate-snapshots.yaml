@@ -99,6 +99,9 @@ jobs:
 
             fs.writeFileSync('dist.zip', Buffer.from(download.data));
 
+      - name: Install unzip utility
+        run: apt-get update && apt-get install -y unzip
+
       - name: Extract build artifacts
         run: |
           unzip -q dist.zip
