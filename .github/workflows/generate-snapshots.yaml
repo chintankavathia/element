@@ -315,7 +315,7 @@ jobs:
             // Wait a bit for the artifact to be uploaded and indexed
             await new Promise(resolve => setTimeout(resolve, 5000));
 
-            const downloadUrl = ${{ steps.upload-artifact.outputs.artifact-url }};
+            const downloadUrl = "${{ steps.upload-artifact.outputs.artifact-url }}";
 
             core.setOutput('download_url', downloadUrl);
 
