@@ -1,4 +1,4 @@
-name: Generate Fresh Snapshots
+name: Snapshots
 
 on:
   workflow_dispatch:
