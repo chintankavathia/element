@@ -315,36 +315,9 @@ jobs:
             // Wait a bit for the artifact to be uploaded and indexed
             await new Promise(resolve => setTimeout(resolve, 5000));
 
-            // Get artifacts from the current workflow run
-            const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId
-            });
-
-            const artifactName = process.env.ARCHIVE_NAME;
-            const artifact = artifacts.artifacts.find(a => a.name === artifactName);
-
-            if (!artifact) {
-              console.log(`Available artifacts: ${artifacts.artifacts.map(a => a.name).join(', ')}`);
-              core.setFailed(`Artifact '${artifactName}' not found`);
-              return;
-            }
-
-            // Get the current workflow run
-            const { data: workflowRun } = await github.rest.actions.getWorkflowRun({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId
-            });
-
-            // Create direct artifact download URL
-            const downloadUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts/${artifact.id}`;
+            const downloadUrl = ${{ steps.upload-artifact.outputs.artifact-url }};
 
             core.setOutput('download_url', downloadUrl);
-            core.setOutput('artifact_name', artifactName);
-            core.setOutput('artifact_id', artifact.id);
-            core.setOutput('workflow_url', workflowRun.html_url);
 
       - name: Comment on PR with download link
         if: success() && github.event_name == 'pull_request'
