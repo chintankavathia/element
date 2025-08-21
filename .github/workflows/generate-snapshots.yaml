@@ -281,7 +281,26 @@ jobs:
             exit 1
           fi
 
+          # Remove existing snapshots to ensure we generate fresh ones
+          if [ -d "playwright/snapshots" ]; then
+            echo "Removing existing snapshots to ensure fresh generation..."
+            rm -rf playwright/snapshots
+          fi
+
+          # Create snapshots directory
+          mkdir -p playwright/snapshots
+
+          echo "Starting fresh snapshot generation..."
           npx playwright test --update-snapshots=all
+
+          # Verify that snapshots were generated
+          if [ ! -d "playwright/snapshots" ] || [ -z "$(ls -A playwright/snapshots 2>/dev/null)" ]; then
+            echo "ERROR: No snapshots were generated!"
+            exit 1
+          fi
+
+          echo "Snapshots generated successfully:"
+          find playwright/snapshots -type f -name "*.png" | head -10
         env:
           PLAYWRIGHT_CONTAINER: true
           PLAYWRIGHT_isvrt: 'true'
@@ -291,6 +310,22 @@ jobs:
 
       - name: Create snapshots archive
         run: |
+          # Verify that snapshots exist and were recently modified
+          if [ ! -d "playwright/snapshots" ]; then
+            echo "ERROR: playwright/snapshots directory does not exist!"
+            exit 1
+          fi
+
+          SNAPSHOT_COUNT=$(find playwright/snapshots -type f -name "*.png" | wc -l)
+          if [ "$SNAPSHOT_COUNT" -eq 0 ]; then
+            echo "ERROR: No snapshot files found in playwright/snapshots!"
+            exit 1
+          fi
+
+          echo "Found $SNAPSHOT_COUNT snapshot files"
+          echo "Recent snapshot files:"
+          find playwright/snapshots -type f -name "*.png" -mmin -60 | head -5
+
           # Create a timestamped archive of the updated snapshots
           TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
           BRANCH_NAME="${{ inputs.ref || github.ref_name }}"
@@ -305,6 +340,14 @@ jobs:
           mkdir -p "${ARCHIVE_NAME}"
           cp -r playwright/snapshots "${ARCHIVE_NAME}/"
 
+          # Verify the copy was successful
+          COPIED_COUNT=$(find "${ARCHIVE_NAME}/snapshots" -type f -name "*.png" | wc -l)
+          echo "Copied $COPIED_COUNT snapshot files to archive"
+
+          if [ "$COPIED_COUNT" -ne "$SNAPSHOT_COUNT" ]; then
+            echo "WARNING: Snapshot count mismatch! Original: $SNAPSHOT_COUNT, Copied: $COPIED_COUNT"
+          fi
+
           # Add metadata file
           cat > "${ARCHIVE_NAME}/snapshot-info.txt" << EOF
           Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
@@ -312,12 +355,14 @@ jobs:
           Commit SHA: ${{ github.sha }}
           Workflow Run: ${{ github.run_id }}
           Generated from workflow run: ${{ steps.get-workflow.outputs.workflow-run-id }}
+          Total snapshot files: ${SNAPSHOT_COUNT}
           EOF
 
           # Create tar.gz archive
           tar -czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
 
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+          echo "Archive created: ${ARCHIVE_NAME}.tar.gz"
 
       - name: Upload fresh snapshots
         uses: actions/upload-artifact@v4
