@@ -33,26 +33,6 @@ jobs:
             echo "target-ref=${{ github.head_ref }}" >> $GITHUB_OUTPUT
           fi
 
-  # This job runs for PRs on first run only, showing instructions for re-running
-  pr-info:
-    runs-on: ubuntu-24.04
-    if: github.event_name == 'pull_request' && github.run_attempt == 1
-    steps:
-      - name: PR Information
-        run: |
-          echo "🔄 This workflow is available for execution on this PR"
-          echo "🎯 Target branch: ${{ github.head_ref }}"
-          echo "📝 To generate snapshots for this PR branch:"
-          echo "   Option 1: Click 'Re-run jobs' or 'Re-run all jobs' on this workflow run"
-          echo "   Option 2: Go to Actions → Generate Fresh Snapshots → Run workflow manually"
-          echo "ℹ️  For manual runs: Select 'Use workflow from' → '${{ github.head_ref }}' and enter the branch name: '${{ github.head_ref }}'"
-          echo "::notice::To run snapshot generation, click 'Re-run jobs' on this workflow or trigger manually"
-
-      - name: Skip first execution
-        run: |
-          echo "✅ Skipping first execution for PR. Use 'Re-run jobs' to execute snapshot generation."
-          echo "::notice::PR detected - first run skipped, re-run to execute snapshot generation"
-
   check-prerequisites:
     runs-on: ubuntu-24.04
     needs: check-trigger
