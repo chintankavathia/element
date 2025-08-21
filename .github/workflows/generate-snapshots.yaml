@@ -18,9 +18,6 @@ jobs:
     runs-on: ubuntu-24.04
     container: mcr.microsoft.com/playwright:v1.54.2-noble
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.run_attempt > 1)
-    env:
-      # See: https://github.com/microsoft/playwright/issues/27620
-      HOME: /root
     steps:
       - name: Check execution conditions and set target ref
         id: check
@@ -32,6 +29,30 @@ jobs:
             # For PR re-runs, use the head ref
             echo "target-ref=${{ github.head_ref }}" >> $GITHUB_OUTPUT
           fi
+
+      # As we are in another container, we need to install LFS manually.
+      # See: https://github.com/orgs/community/discussions/160433
+      - name: Install LFS
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash
+          apt install git-lfs -y
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.check.outputs.target-ref }}
+          lfs: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/jod
+          cache: 'npm'
 
       - name: Get latest workflow run
         id: get-workflow
@@ -53,7 +74,7 @@ jobs:
             }
 
             // Find the most recent run that has the required jobs completed successfully
-            const requiredJobs = ['build', 'test', 'aot'];
+            const requiredJobs = ['build'];
             let latestValidRun = null;
 
             for (const run of runs.workflow_runs) {
@@ -115,30 +136,6 @@ jobs:
 
             core.notice(`Using workflow run ${latestValidRun.id} | Required jobs status: ${requiredJobStatuses}`);
 
-      # As we are in another container, we need to install LFS manually.
-      # See: https://github.com/orgs/community/discussions/160433
-      - name: Install LFS
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash
-          apt install git-lfs -y
-
-      - name: Configure Git
-        run: |
-          git config --global user.email "action@github.com"
-          git config --global user.name "GitHub Action"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ steps.check.outputs.target-ref }}
-          lfs: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: lts/jod
-          cache: 'npm'
-
       # Download the dist artifacts from the latest successful build-and-test workflow
       - name: Download build artifacts
         uses: actions/github-script@v7
@@ -199,23 +196,11 @@ jobs:
           if [ -d "dist/playwright" ]; then
             cp -r dist/playwright ./
           fi
-
       # Not injecting the token will exclude the brand packages, but this is fine for e2e tests.
-      - name: Install dependencies
-        run: npm ci --prefer-offline --no-audit --include=optional
+      - run: npm ci --prefer-offline --no-audit --include=optional
 
       - name: Generate fresh snapshots
         run: |
-          # If playwright directory is still missing, try to copy from dist
-          if [ ! -d "playwright/e2e" ] && [ -d "dist/playwright/e2e" ]; then
-            cp -r dist/playwright ./
-          fi
-
-          if [ ! -d "playwright/e2e" ]; then
-            echo "ERROR: playwright/e2e directory is missing!"
-            exit 1
-          fi
-
           # Remove existing snapshots to ensure we generate fresh ones
           if [ -d "playwright/snapshots" ]; then
             echo "Removing existing snapshots to ensure fresh generation..."
@@ -244,22 +229,6 @@ jobs:
 
       - name: Create snapshots archive
         run: |
-          # Verify that snapshots exist and were recently modified
-          if [ ! -d "playwright/snapshots" ]; then
-            echo "ERROR: playwright/snapshots directory does not exist!"
-            exit 1
-          fi
-
-          SNAPSHOT_COUNT=$(find playwright/snapshots -type f -name "*.png" | wc -l)
-          if [ "$SNAPSHOT_COUNT" -eq 0 ]; then
-            echo "ERROR: No snapshot files found in playwright/snapshots!"
-            exit 1
-          fi
-
-          echo "Found $SNAPSHOT_COUNT snapshot files"
-          echo "Recent snapshot files:"
-          find playwright/snapshots -type f -name "*.png" -mmin -60 | head -5
-
           # Create a timestamped archive of the updated snapshots
           TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
           BRANCH_NAME="${{ inputs.ref || github.ref_name }}"
@@ -281,16 +250,6 @@ jobs:
           if [ "$COPIED_COUNT" -ne "$SNAPSHOT_COUNT" ]; then
             echo "WARNING: Snapshot count mismatch! Original: $SNAPSHOT_COUNT, Copied: $COPIED_COUNT"
           fi
-
-          # Add metadata file
-          cat > "${ARCHIVE_NAME}/snapshot-info.txt" << EOF
-          Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          Branch/Ref: ${BRANCH_NAME}
-          Commit SHA: ${{ github.sha }}
-          Workflow Run: ${{ github.run_id }}
-          Generated from workflow run: ${{ steps.get-workflow.outputs.workflow-run-id }}
-          Total snapshot files: ${SNAPSHOT_COUNT}
-          EOF
 
           # Create tar.gz archive
           tar -czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
@@ -325,43 +284,3 @@ jobs:
         with:
           message: |
             [⬇️ Download Snapshots](${{ steps.artifact.outputs.download_url }})
-
-      - name: Generate test report
-        if: always()
-        run: npx playwright show-report --reporter=html || true
-
-      - name: Upload test report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-report-snapshots-${{ github.run_id }}
-          path: playwright-report
-          retention-days: 7
-
-      - name: Generate summary
-        if: always()
-        run: |
-          echo "## Snapshot Generation Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "**Execution Type:** PR Re-run" >> $GITHUB_STEP_SUMMARY
-            echo "**PR Branch:** ${{ github.head_ref }}" >> $GITHUB_STEP_SUMMARY
-            echo "**Target Branch:** ${{ steps.check.outputs.target-ref }}" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "**Execution Type:** Manual Dispatch" >> $GITHUB_STEP_SUMMARY
-            echo "**Branch/Ref:** ${{ steps.check.outputs.target-ref }}" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "**Based on workflow run:** ${{ steps.get-workflow.outputs.workflow-run-id }} (build, test, aot jobs completed)" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ Fresh snapshots have been generated successfully!" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY            
-            echo "The updated snapshots are available as downloadable artifacts from this workflow run." >> $GITHUB_STEP_SUMMARY
-            echo "Look for the artifact named \`playwright-snapshots-*\` in the artifacts section." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Snapshot generation failed. Check the logs for details." >> $GITHUB_STEP_SUMMARY
-          fi
