@@ -33,28 +33,6 @@ jobs:
             echo "target-ref=${{ github.head_ref }}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Validate branch exists
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const branchName = '${{ steps.check.outputs.target-ref }}';
-
-            try {
-              await github.rest.repos.getBranch({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                branch: branchName
-              });
-              console.log(`✅ Branch '${branchName}' exists and is valid`);
-            } catch (error) {
-              if (error.status === 404) {
-                core.setFailed(`❌ Branch '${branchName}' does not exist in this repository. Please check the branch name and try again.`);
-              } else {
-                core.setFailed(`❌ Failed to validate branch '${branchName}': ${error.message}`);
-              }
-              return;
-            }
-
       - name: Get latest workflow run
         id: get-workflow
         uses: actions/github-script@v7
@@ -102,7 +80,6 @@ jobs:
 
                 if (allRequiredJobsSuccessful) {
                   latestValidRun = run;
-                  console.log(`✅ Found valid run ${run.id} with all required jobs successful`);
                   break;
                 } else {
                   const failedJobs = requiredJobs.filter(jobName => 
@@ -123,9 +100,6 @@ jobs:
 
             core.setOutput('workflow-run-id', latestValidRun.id);
             core.setOutput('workflow-status', latestValidRun.conclusion);
-
-            console.log(`Using workflow run ${latestValidRun.id} with required jobs completed successfully`);
-            console.log(`Overall workflow status: ${latestValidRun.conclusion} (note: overall status may be different, but required jobs are successful)`);
 
             // Create a summary of what we found
             const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
