@@ -204,15 +204,6 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit --include=optional
 
-      # Fix Docker config permission issue
-      - name: Fix Docker permissions
-        run: |
-          mkdir -p /root/.docker
-          chmod 755 /root/.docker
-          # Create a minimal Docker config to avoid permission errors
-          echo '{}' > /root/.docker/config.json
-          chmod 644 /root/.docker/config.json
-
       # Install http-server globally to ensure it's available
       - name: Install http-server
         run: npm install -g http-server
