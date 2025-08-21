@@ -138,64 +138,12 @@ jobs:
 
       # Download the dist artifacts from the latest successful build-and-test workflow
       - name: Download build artifacts
-        uses: actions/github-script@v7
+        uses: actions/download-artifact@v5
         with:
-          script: |
-            const fs = require('fs');
-
-            // Get artifacts from the successful workflow run
-            const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: ${{ steps.get-workflow.outputs.workflow-run-id }}
-            });
-
-            const distArtifact = artifacts.artifacts.find(artifact => artifact.name === 'dist');
-            if (!distArtifact) {
-              core.setFailed('No dist artifact found in the latest workflow run');
-              return;
-            }
-
-            // Download the artifact
-            const download = await github.rest.actions.downloadArtifact({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              artifact_id: distArtifact.id,
-              archive_format: 'zip',
-            });
-
-            fs.writeFileSync('dist.zip', Buffer.from(download.data));
-
-      - name: Install unzip utility
-        run: apt-get update && apt-get install -y unzip
-
-      - name: Extract build artifacts
-        run: |
-          unzip -q dist.zip
-
-          # Check if dist directory exists, if not, the contents might be extracted directly
-          if [ ! -d "dist" ]; then
-            # Look for element-examples and dashboards-demo directories
-            if [ -d "element-examples" ] || [ -d "dashboards-demo" ]; then
-              mkdir -p dist
-              [ -d "element-examples" ] && mv element-examples dist/
-              [ -d "dashboards-demo" ] && mv dashboards-demo dist/
-              # Move any other potential dist contents
-              for dir in */; do
-                if [ "$dir" != "dist/" ] && [ "$dir" != "node_modules/" ] && [ "$dir" != ".git/" ]; then
-                  mv "$dir" dist/ 2>/dev/null || true
-                fi
-              done
-            else
-              echo "ERROR: Neither dist directory nor expected contents found"
-              exit 1
-            fi
-          fi
-
-          # Check if playwright directory is in dist and copy it to root if needed
-          if [ -d "dist/playwright" ]; then
-            cp -r dist/playwright ./
-          fi
+          name: dist
+          path: dist
+          run-id: ${{ steps.get-workflow.outputs.workflow-run-id }}
+          github-token: ${{ github.token }}
       # Not injecting the token will exclude the brand packages, but this is fine for e2e tests.
       - run: npm ci --prefer-offline --no-audit --include=optional
 
