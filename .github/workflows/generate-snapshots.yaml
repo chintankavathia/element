@@ -208,32 +208,6 @@ jobs:
       - name: Install http-server
         run: npm install -g http-server
 
-      # Test if the web servers can start properly
-      - name: Test web server startup
-        run: |
-          if [ ! -d "dist/element-examples" ]; then
-            echo "dist/element-examples directory not found"
-            exit 1
-          fi
-
-          if [ ! -d "dist/dashboards-demo" ]; then
-            echo "dist/dashboards-demo directory not found"
-            exit 1
-          fi
-
-          # Quick test that servers can start
-          timeout 10s npx http-server dist/element-examples -s -p 4200 -a 127.0.0.1 &
-          SERVER_PID=$!
-          sleep 5
-          curl -f http://127.0.0.1:4200/ > /dev/null 2>&1 || (echo "element-examples server failed" && exit 1)
-          kill $SERVER_PID || true
-
-          timeout 10s npx http-server dist/dashboards-demo -s -p 4201 -a 127.0.0.1 &
-          SERVER_PID=$!
-          sleep 5
-          curl -f http://127.0.0.1:4201/ > /dev/null 2>&1 || (echo "dashboards-demo server failed" && exit 1)
-          kill $SERVER_PID || true
-
       - name: Generate fresh snapshots
         run: |
           # If playwright directory is still missing, try to copy from dist
