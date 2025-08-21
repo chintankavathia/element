@@ -120,21 +120,6 @@ jobs:
             }
 
             core.setOutput('workflow-run-id', latestValidRun.id);
-            core.setOutput('workflow-status', latestValidRun.conclusion);
-
-            // Create a summary of what we found
-            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: latestValidRun.id
-            });
-
-            const requiredJobStatuses = requiredJobs.map(jobName => {
-              const job = jobs.jobs.find(j => j.name === jobName);
-              return `${jobName}: ${job ? job.conclusion : 'not found'}`;
-            }).join(', ');
-
-            core.notice(`Using workflow run ${latestValidRun.id} | Required jobs status: ${requiredJobStatuses}`);
 
       # Download the dist artifacts from the latest successful build-and-test workflow
       - name: Download build artifacts
